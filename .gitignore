@@ -11,3 +11,11 @@ wheels/
 
 # Per-platform venvs — the Mac uses .venv-macos over the share.
 .venv-*/
+
+# Agent instructions stay OUT of every repo under energy-solution. They are
+# workspace- and machine-specific context, not part of the product: they name
+# local paths, the SMB share, and how this particular box is set up, none of
+# which is true for anyone who clones this. The workspace copy lives one level
+# up, outside any repo.
+CLAUDE.md
+.claude/
