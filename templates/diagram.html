@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}{{ diagram.title }} — Diagram Gallery{% endblock %}
+
+{% block content %}
+<a class="back" href="/">&larr; All diagrams</a>
+<h1>{{ diagram.title }}</h1>
+
+<div class="card">
+    {% if diagram.description %}<p class="desc">{{ diagram.description }}</p>{% endif %}
+    <pre class="mermaid">{{ diagram.code }}</pre>
+</div>
+
+<details>
+    <summary>Mermaid source ({{ diagram.slug }}.mer)</summary>
+    <pre>{{ diagram.code }}</pre>
+</details>
+{% endblock %}

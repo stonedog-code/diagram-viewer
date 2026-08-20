@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Diagram Gallery</h1>
+
+{% if not diagrams %}
+<p class="empty">No <code>.mer</code> files found in <code>diagrams/</code>.</p>
+{% endif %}
+
+{% for d in diagrams %}
+<div class="card">
+    <h2><a href="/diagram/{{ d.slug }}">{{ d.title }}</a></h2>
+    {% if d.description %}<p class="desc">{{ d.description }}</p>{% endif %}
+</div>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,8 @@
+%% title: Architecture Flowchart
+%% description: High-level overview of services and pipelines
+graph TD
+    A[Client] -->|HTTP POST| B(API Gateway)
+    B --> C{Authentication}
+    C -->|Valid| D[Worker Service]
+    C -->|Invalid| E[401 Unauthorized]
+    D --> F[(Database)]
