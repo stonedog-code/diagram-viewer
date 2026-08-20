@@ -1,8 +1,9 @@
 [project]
 name = "diagram-viewer"
 version = "0.1.0"
-description = "Add your description here"
+description = "Serve a gallery of Mermaid .mer diagram files over FastAPI."
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141.1",

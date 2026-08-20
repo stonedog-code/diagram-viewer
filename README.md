@@ -182,3 +182,11 @@ the flowchart's labels present in the rendered output.
   unescaped `<` would break the page. Jinja2 autoescaping handles both,
   including inside the Mermaid block — the browser decodes the entities back
   into `textContent`, which is what Mermaid parses.
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Copyright 2026 nehsa.net.
+
+Mermaid itself is not vendored here: the browser loads it from a CDN at runtime,
+under its own MIT license.
