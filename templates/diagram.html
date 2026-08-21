@@ -8,11 +8,201 @@
 
 <div class="card">
     {% if diagram.description %}<p class="desc">{{ diagram.description }}</p>{% endif %}
-    <pre class="mermaid">{{ diagram.code }}</pre>
+
+    <div class="zoom-bar" role="group" aria-label="Diagram zoom">
+        <button type="button" id="zoom-out" aria-label="Zoom out" title="Zoom out (−)">&minus;</button>
+        <button type="button" id="zoom-in" aria-label="Zoom in" title="Zoom in (+)">&plus;</button>
+        <button type="button" id="zoom-reset" aria-label="Reset zoom to 100%" title="Reset to 100% (0)">Reset</button>
+        <button type="button" id="zoom-fit" aria-label="Fit diagram to width" title="Fit to width (F)">Fit</button>
+        <span class="zoom-level" id="zoom-level" role="status" aria-live="polite">100%</span>
+        <span class="zoom-hint">drag to pan &middot; <kbd>+</kbd> <kbd>&minus;</kbd> <kbd>0</kbd> <kbd>F</kbd></span>
+    </div>
+
+    <div class="zoom-viewport" id="zoom-viewport" tabindex="0">
+        <div class="zoom-sizer" id="zoom-sizer">
+            <div class="zoom-pane" id="zoom-pane">
+                <pre class="mermaid">{{ diagram.code }}</pre>
+            </div>
+        </div>
+    </div>
 </div>
 
 <details>
     <summary>Mermaid source ({{ diagram.slug }}.mer)</summary>
     <pre>{{ diagram.code }}</pre>
 </details>
+
+<script>
+(function () {
+    var viewport = document.getElementById('zoom-viewport');
+    var sizer = document.getElementById('zoom-sizer');
+    var pane = document.getElementById('zoom-pane');
+    var label = document.getElementById('zoom-level');
+    if (!viewport || !sizer || !pane || !label) return;
+
+    // Discrete stops for the buttons, so repeated clicks land back on exactly
+    // 100% instead of drifting. `scale` itself is a free float, because Fit
+    // has to be able to sit between two stops.
+    var STOPS = [0.1, 0.15, 0.25, 0.4, 0.5, 0.65, 0.8, 1, 1.25, 1.5, 2, 2.5, 3, 4];
+    var MIN = STOPS[0], MAX = STOPS[STOPS.length - 1];
+    var scale = 1;
+    var natural = null;
+    var userHasZoomed = false;
+
+    // Mermaid ships the <svg> as `width: 100%; max-width: <natural>px`, which
+    // is responsive but has no definite width to resolve against inside a
+    // `max-content` box — it collapses to the CSS default 300px replaced-element
+    // size. Pin it to its own viewBox instead: the pane then measures the real
+    // diagram, and scaling that is what zoom means here.
+    function pinSvg() {
+        var svg = pane.querySelector('svg');
+        if (!svg) return null;
+        var box = svg.viewBox && svg.viewBox.baseVal;
+        var w = box && box.width, h = box && box.height;
+        if (!w || !h) {
+            try {
+                var bb = svg.getBBox();
+                w = bb.width; h = bb.height;
+            } catch (err) { return null; }
+        }
+        if (!w || !h) return null;
+        svg.style.maxWidth = 'none';
+        svg.style.width = w + 'px';
+        svg.style.height = h + 'px';
+        return { w: w, h: h };
+    }
+
+    function measure() {
+        var pinned = pinSvg();
+        if (pinned) {
+            // The pane's padding is part of what gets scaled, so measure it in.
+            var pad = 2 * parseFloat(getComputedStyle(pane).paddingLeft || 0);
+            natural = { w: pinned.w + pad, h: pinned.h + pad };
+            return;
+        }
+        // No SVG — Mermaid has not run, or the CDN is unreachable and the raw
+        // source is still on screen. Measure that instead so the page is not
+        // broken offline; zoom just scales the text.
+        var previous = pane.style.transform;
+        pane.style.transform = 'none';
+        natural = { w: pane.scrollWidth, h: pane.scrollHeight };
+        pane.style.transform = previous;
+    }
+
+    function apply() {
+        pane.style.transform = 'scale(' + scale + ')';
+        if (natural) {
+            sizer.style.width = Math.ceil(natural.w * scale) + 'px';
+            sizer.style.height = Math.ceil(natural.h * scale) + 'px';
+        }
+        label.textContent = Math.round(scale * 100) + '%';
+    }
+
+    function setScale(next) {
+        scale = Math.min(MAX, Math.max(MIN, next));
+        apply();
+    }
+
+    // Move to the next stop strictly above/below the current scale, so a step
+    // taken from a Fit-derived value like 36% still goes somewhere sensible.
+    function step(direction) {
+        userHasZoomed = true;
+        var epsilon = 0.001;
+        var i;
+        if (direction > 0) {
+            for (i = 0; i < STOPS.length; i++) {
+                if (STOPS[i] > scale + epsilon) return setScale(STOPS[i]);
+            }
+            return setScale(MAX);
+        }
+        for (i = STOPS.length - 1; i >= 0; i--) {
+            if (STOPS[i] < scale - epsilon) return setScale(STOPS[i]);
+        }
+        return setScale(MIN);
+    }
+
+    function reset() {
+        userHasZoomed = true;
+        setScale(1);
+    }
+
+    // Never zoom past 100% to fill the viewport — a small diagram blown up
+    // looks like a rendering fault, so Fit only ever shrinks.
+    function fit(markAsUserAction) {
+        if (markAsUserAction !== false) userHasZoomed = true;
+        if (!natural || !natural.w) return;
+        var available = viewport.clientWidth;
+        if (!available) return;
+        setScale(Math.min(1, available / natural.w));
+    }
+
+    document.getElementById('zoom-in').addEventListener('click', function () { step(1); });
+    document.getElementById('zoom-out').addEventListener('click', function () { step(-1); });
+    document.getElementById('zoom-reset').addEventListener('click', reset);
+    document.getElementById('zoom-fit').addEventListener('click', function () { fit(true); });
+
+    document.addEventListener('keydown', function (event) {
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
+        var tag = (event.target.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || event.target.isContentEditable) return;
+        if (event.key === '+' || event.key === '=') { step(1); event.preventDefault(); }
+        else if (event.key === '-' || event.key === '_') { step(-1); event.preventDefault(); }
+        else if (event.key === '0') { reset(); event.preventDefault(); }
+        else if (event.key === 'f' || event.key === 'F') { fit(true); event.preventDefault(); }
+    });
+
+    // Drag to pan. Pointer events cover mouse, pen and touch in one path.
+    var dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+    viewport.addEventListener('pointerdown', function (event) {
+        if (event.button !== 0) return;
+        dragging = true;
+        startX = event.clientX;
+        startY = event.clientY;
+        startLeft = viewport.scrollLeft;
+        startTop = viewport.scrollTop;
+        viewport.classList.add('grabbing');
+        viewport.setPointerCapture(event.pointerId);
+    });
+    viewport.addEventListener('pointermove', function (event) {
+        if (!dragging) return;
+        viewport.scrollLeft = startLeft - (event.clientX - startX);
+        viewport.scrollTop = startTop - (event.clientY - startY);
+    });
+    function endDrag(event) {
+        if (!dragging) return;
+        dragging = false;
+        viewport.classList.remove('grabbing');
+        if (event.pointerId !== undefined && viewport.hasPointerCapture(event.pointerId)) {
+            viewport.releasePointerCapture(event.pointerId);
+        }
+    }
+    viewport.addEventListener('pointerup', endDrag);
+    viewport.addEventListener('pointercancel', endDrag);
+
+    // Mermaid replaces the <pre> with an <svg> asynchronously from the CDN, so
+    // the size at parse time is the size of the *source text*. Re-measure
+    // whenever the pane's children change, coalesced to one measure per frame
+    // because Mermaid emits many small mutations while it draws.
+    var pending = false;
+    function refresh() {
+        if (pending) return;
+        pending = true;
+        window.requestAnimationFrame(function () {
+            pending = false;
+            measure();
+            // Until the reader touches a control, keep a wide diagram fitted —
+            // opening on a diagram scrolled off the right edge reads as broken.
+            if (!userHasZoomed) fit(false); else apply();
+        });
+    }
+    refresh();
+    if (window.MutationObserver) {
+        new MutationObserver(refresh).observe(pane, { childList: true, subtree: true });
+    }
+    window.addEventListener('load', refresh);
+    window.addEventListener('resize', function () {
+        if (!userHasZoomed) refresh();
+    });
+})();
+</script>
 {% endblock %}

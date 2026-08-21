@@ -78,3 +78,70 @@ def test_empty_diagrams_directory_renders_an_empty_gallery(tmp_path, monkeypatch
     response = client.get("/")
     assert response.status_code == 200
     assert 'class="card"' not in response.text
+
+
+def test_every_diagram_page_ships_the_zoom_controls():
+    # The zoom UI is three cooperating pieces — a scrolling viewport, a sizer
+    # that carries the scrollable area, and the pane that is actually scaled.
+    # Losing any one of them leaves a page that still renders and still passes
+    # every other test here, so each id is asserted by name.
+    required = [
+        'id="zoom-viewport"',
+        'id="zoom-sizer"',
+        'id="zoom-pane"',
+        'id="zoom-in"',
+        'id="zoom-out"',
+        'id="zoom-reset"',
+        'id="zoom-fit"',
+        'id="zoom-level"',
+    ]
+    diagrams = loader.load_diagrams()
+    assert diagrams, "fixture check: no diagrams on disk to visit"
+    for d in diagrams:
+        body = client.get(f"/diagram/{d.slug}").text
+        for marker in required:
+            assert marker in body, f"{d.slug} is missing {marker}"
+
+
+def test_zoom_pane_wraps_the_mermaid_block():
+    # Order matters: the pane must ENCLOSE the diagram, not sit beside it.
+    # A pane that does not contain the <pre> scales an empty box.
+    body = client.get(f"/diagram/{loader.load_diagrams()[0].slug}").text
+    pane = body.index('id="zoom-pane"')
+    mermaid = body.index('class="mermaid"', pane)
+    closing = body.index("</pre>", mermaid)
+    assert pane < mermaid < closing
+
+
+def test_diagram_source_is_not_double_quoted_inside_mermaid_labels():
+    # A literal `"` inside a label terminates it and Mermaid renders a syntax
+    # error instead of the diagram — invisible to every other test here,
+    # because the route still returns 200 with the text intact.
+    #
+    # Quote COUNTING does not catch it: the real defect that prompted this test
+    # (`<i>"no inbound"</i>` inside a label) left an even number of quotes on
+    # the line. What actually distinguishes a label from a stray quote is what
+    # sits either side of it, so pair the quotes up and check the neighbours.
+    # Mermaid has many shape delimiters — `["…"]`, `[("…")]`, `{"…"}`, `|"…"|`,
+    # and the bare `-- "…" -->` edge form — so the test is written against the
+    # characters that may abut a quote rather than against a list of shapes.
+    OPENERS = set('[({|>')
+    CLOSERS = set('])}|>')
+
+    for d in loader.load_diagrams():
+        for lineno, line in enumerate(d.code.splitlines(), 1):
+            if line.lstrip().startswith("%%"):
+                continue  # a comment may say anything
+            quotes = [i for i, ch in enumerate(line) if ch == '"']
+            assert len(quotes) % 2 == 0, f"{d.slug}:{lineno} has an odd number of quotes"
+            for opening, closing in zip(quotes[::2], quotes[1::2]):
+                before = line[opening - 1] if opening else ""
+                after = line[closing + 1] if closing + 1 < len(line) else ""
+                assert before in OPENERS or before.isspace() or before == "-", (
+                    f"{d.slug}:{lineno} opens a label after {before!r} — "
+                    f"a stray quote inside another label"
+                )
+                assert after in CLOSERS or after.isspace() or after == "-", (
+                    f"{d.slug}:{lineno} closes a label before {after!r} — "
+                    f"a stray quote inside another label"
+                )

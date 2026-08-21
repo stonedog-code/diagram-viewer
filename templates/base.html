@@ -56,6 +56,78 @@
             margin-top: 1rem;
             overflow-x: auto;
         }
+
+        /* --- zoom ---------------------------------------------------------
+           The viewport clips and scrolls; the pane inside it is what scales.
+           Scaling the pane rather than the SVG keeps Mermaid's own inline
+           `max-width` on the <svg> out of the argument, and keeps the
+           scrollable area honest: a transform alone does not grow the
+           scrollbars, so the pane's width/height are set from the measured
+           size at each zoom step. */
+        .zoom-viewport {
+            background: #ffffff;
+            border-radius: 6px;
+            margin-top: 1rem;
+            overflow: auto;
+            max-height: 75vh;
+            position: relative;
+        }
+        /* The sizer is what the scrollbars measure. A CSS transform does not
+           affect layout, so scaling the pane alone would leave the scrollable
+           area stuck at 100% and clip a zoomed-in diagram. */
+        .zoom-sizer {
+            width: max-content;
+        }
+        .zoom-pane {
+            transform-origin: top left;
+            padding: 1rem;
+            width: max-content;
+        }
+        .zoom-viewport .mermaid {
+            margin-top: 0;
+            padding: 0;
+            overflow: visible;
+        }
+        .zoom-viewport.grabbing {
+            cursor: grabbing;
+        }
+        .zoom-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+        .zoom-bar button {
+            font: inherit;
+            font-size: 0.95rem;
+            line-height: 1;
+            min-width: 2.25rem;
+            padding: 0.5rem 0.75rem;
+            color: #f8fafc;
+            background: #334155;
+            border: 1px solid #475569;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .zoom-bar button:hover {
+            background: #475569;
+        }
+        .zoom-bar button:focus-visible {
+            outline: 2px solid #38bdf8;
+            outline-offset: 2px;
+        }
+        .zoom-level {
+            color: #94a3b8;
+            font-size: 0.9rem;
+            font-variant-numeric: tabular-nums;
+            min-width: 4ch;
+        }
+        .zoom-hint {
+            color: #64748b;
+            font-size: 0.85rem;
+            margin-left: auto;
+        }
         .back {
             display: inline-block;
             margin-bottom: 1.5rem;
