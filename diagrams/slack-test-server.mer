@@ -1,0 +1,52 @@
+%% title: Running Tests from Slack — the Test Server
+%% description: The private half — it opens every connection, runs the suite, and does all the talking to Slack
+
+flowchart TD
+    classDef runner fill:#0F172A,stroke:#38BDF8,stroke-width:2px,color:#fff;
+    classDef edge fill:#1E293B,stroke:#F59E0B,stroke-width:2px,color:#fff;
+    classDef slack fill:#4A154B,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef work fill:#082F49,stroke:#7DD3FC,stroke-width:2px,color:#E0F2FE;
+    classDef note fill:#111827,stroke:#64748B,stroke-width:1px,color:#CBD5E1;
+    classDef guard fill:#1E1B4B,stroke:#818CF8,stroke-width:2px,color:#E0E7FF;
+
+    EDGE["🌐 <b>Edge server</b><br/>public. Holds the queue.<br/><i>Never dials in — it is always the one being called.</i>"]:::edge
+    SLACKOUT["📢 <b>#testing in Slack</b>"]:::slack
+
+    subgraph HOST["🖥️ TEST SERVER — inside our network. Identical Debian 12 hosts, 1 to N of them. No inbound port."]
+        direction TB
+
+        BOOT["🔑 <b>1 · Enrol, once</b><br/>Generates an Ed25519 keypair and keeps the<br/>private half on disk. It <b>never leaves this host.</b><br/>The edge is given the public half — a bootstrap<br/>token in the lab, an operator in production."]:::guard
+
+        HB["💓 <b>2 · Heartbeat, every 30s</b><br/>Signed, outbound. Says: still here, still healthy,<br/>this is how many jobs I am running.<br/><i>Silence for 90s and the edge stops<br/>giving this host work.</i>"]:::runner
+
+        POLL["📥 <b>3 · Long-poll for work</b><br/><i>Anything for me?</i> — held open ~25s, then a job<br/>or 'nothing yet', and asked again.<br/><b>This is the whole trick:</b> a request that is<br/>outbound but behaves like a push."]:::runner
+
+        CLAIM["📋 <b>4 · Claim under a lease</b><br/>The job is now this host's alone. The lease is<br/>renewed while the suite runs, so a crash here<br/>simply returns the job to the queue."]:::runner
+
+        RUN["🧪 <b>5 · Run pytest</b><br/>Suite and server come from the edge already<br/>matched against a fixed list, so they are<br/>arguments in a list — never a shell string.<br/><i>Exit code is propagated unchanged.</i>"]:::work
+
+        REPORT["📊 <b>6 · Report the result to the edge</b><br/>Signed: counts, duration, exit code, run id.<br/><i>A forged result would be a forged Slack<br/>message, so results are signed too.</i>"]:::runner
+    end
+
+    TALK["📣 <b>All four Slack messages come from here</b><br/>1 · task received&nbsp;&nbsp;2 · task started<br/>3 · task complete&nbsp;&nbsp;4 · summary of results<br/>Counts and a run id — <b>never the suite's stdout</b>,<br/>which can carry hostnames, paths and secrets.<br/><i>No bot token configured ⇒ printed to the console<br/>instead, saying exactly what it would have sent.</i>"]:::note
+
+    OUTBOUND["🔒 <b>Every connection on this page points outward</b><br/>Enrol · heartbeat · ask for work · report.<br/>Nothing outside opens a connection to this host,<br/>so there is <b>no listening port, no VPN, no inbound firewall rule</b>.<br/>Outbound HTTPS to the edge is still an egress rule — <i>&ldquo;no inbound&rdquo; is the<br/>honest claim; &ldquo;no firewall hole&rdquo; would not be.</i><br/><i>The edge still decides who gets what — only the<br/>direction of the wire is inverted.</i>"]:::note
+
+    BOOT --> HB
+    HB --> POLL
+    POLL -->|"a job"| CLAIM
+    POLL -.->|"'nothing yet'"| POLL
+    CLAIM --> RUN
+    RUN --> REPORT
+    REPORT -->|"ready for the next one"| POLL
+
+    BOOT ==>|"public key"| EDGE
+    HB ==>|"signed, outbound"| EDGE
+    POLL ==>|"signed, outbound"| EDGE
+    REPORT ==>|"signed, outbound"| EDGE
+
+    CLAIM -->|"task received · task started"| SLACKOUT
+    REPORT -->|"task complete · summary"| SLACKOUT
+
+    TALK -.- SLACKOUT
+    OUTBOUND -.- HOST

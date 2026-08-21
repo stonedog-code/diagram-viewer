@@ -1,0 +1,44 @@
+%% title: Test Architecture — Traditional REST + SPA
+%% description: Playwright over a JSON API and a client-rendered UI — arrange over the API, act through the UI, assert through both
+
+flowchart TD
+    classDef e2e fill:#1E293B,stroke:#38BDF8,stroke-width:2px,color:#fff;
+    classDef integration fill:#1E293B,stroke:#F59E0B,stroke-width:2px,color:#fff;
+    classDef helper fill:#0F172A,stroke:#10B981,stroke-width:2px,color:#fff;
+    classDef target fill:#334155,stroke:#94A3B8,stroke-width:1px,color:#fff;
+    classDef di fill:#4C1D95,stroke:#A855F7,stroke-width:2px,color:#fff;
+
+    subgraph DI ["Playwright Fixture & Dependency Injection Layer"]
+        FIX["<b>Custom Test Fixtures</b><br/><code>test.extend({ api, pages })</code>"]:::di
+    end
+
+    subgraph TestSuites ["Test Execution Layer (AAA Pattern)"]
+        E2E["<b>tests/e2e/</b><br/>User Flows & UI Validation"]:::e2e
+        INT["<b>tests/integration/</b><br/>API Contracts & Business Rules"]:::integration
+    end
+
+    subgraph AbstractionLayer ["Abstraction & Helper Layer"]
+        API_HELPER["<b>tests/api/</b><br/>API Client Helpers & Seeding"]:::helper
+        POM["<b>tests/pages/</b><br/>Page Object Models (Locators & Actions)"]:::helper
+    end
+
+    subgraph SystemUnderTest ["System Under Test (SUT)"]
+        BACKEND["<b>Backend REST / GraphQL API</b>"]:::target
+        FRONTEND["<b>Frontend UI</b><br/>(DOM rendered in Browser Context)"]:::target
+        DB[("<b>Database / State</b>")]:::target
+    end
+
+    %% Wiring & Injections
+    FIX -->|Injects instances| E2E
+    FIX -->|Injects client| INT
+
+    %% Abstraction Connections
+    E2E -->|1. Arrange: Fast State Seeding| API_HELPER
+    E2E -->|2. Act & Assert: UI Interactions| POM
+    INT -->|Arrange, Act, Assert| API_HELPER
+
+    %% System Interactions
+    API_HELPER -->|Direct HTTP Calls| BACKEND
+    POM -->|Playwright Locators & Actions| FRONTEND
+    BACKEND --> DB
+    FRONTEND -.->|Interacts / Fetches| BACKEND

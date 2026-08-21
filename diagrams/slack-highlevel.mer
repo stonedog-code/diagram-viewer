@@ -1,0 +1,31 @@
+%% title: Running Tests from Slack — Overview
+%% description: The short version — three pieces, and who talks to whom when someone types the command
+
+flowchart TD
+    classDef person fill:#0F766E,stroke:#5EEAD4,stroke-width:2px,color:#fff;
+    classDef slack fill:#4A154B,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef edge fill:#1E293B,stroke:#F59E0B,stroke-width:2px,color:#fff;
+    classDef runner fill:#0F172A,stroke:#38BDF8,stroke-width:2px,color:#fff;
+    classDef note fill:#111827,stroke:#64748B,stroke-width:1px,color:#CBD5E1;
+
+    P["🧑 <b>Anyone on the team</b><br/>No GitHub account, no VPN,<br/>no need to know pytest"]:::person
+
+    S["💬 <b>Slack</b><br/><code>/testauto runtests checkout staging</code><br/><i>which suite · which server</i>"]:::slack
+
+    E["🌐 <b>Edge server</b><br/>The only public piece.<br/>Checks the request is genuine<br/>and allowed, then parks it on<br/>a list of work to do.<br/><i>Runs no tests itself.</i>"]:::edge
+
+    T["🖥️ <b>Test server</b><br/>Lives inside our network.<br/>Asks for work, runs the suite,<br/>and reports what happened."]:::runner
+
+    OUT["📢 <b>#testing in Slack</b><br/>started · finished ·<br/><i>42 passed, 1 failed, 3m 12s</i>"]:::slack
+
+    WHY["🔒 <b>Why the arrows point that way</b><br/>The test server always calls <b>out</b>.<br/>Nothing outside ever calls in, so<br/>there is no door to knock on."]:::note
+
+    P -->|"types the command"| S
+    S -->|"1 · sends it on"| E
+    E -.->|"2 · replies in under 3 seconds: <i>queued</i>"| S
+    T -->|"3 · anything for me?"| E
+    E -->|"4 · here is the job"| T
+    T -->|"5 · runs the suite,<br/>then says how it went"| OUT
+    OUT -->|"everyone can read it"| P
+
+    WHY -.- T
