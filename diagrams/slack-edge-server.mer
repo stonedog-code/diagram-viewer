@@ -1,0 +1,63 @@
+%% title: Running Tests from Slack — the Edge Server
+%% description: The public half — two doors, four gates, one queue, and a deliberate list of things it will not do
+
+flowchart TD
+    classDef slack fill:#4A154B,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef edge fill:#1E293B,stroke:#F59E0B,stroke-width:2px,color:#fff;
+    classDef door fill:#422006,stroke:#F59E0B,stroke-width:2px,color:#FEF3C7;
+    classDef queue fill:#0F172A,stroke:#A78BFA,stroke-width:2px,color:#fff;
+    classDef ack fill:#064E3B,stroke:#10B981,stroke-width:1px,color:#fff;
+    classDef runner fill:#0F172A,stroke:#38BDF8,stroke-width:2px,color:#fff;
+    classDef note fill:#111827,stroke:#64748B,stroke-width:1px,color:#CBD5E1;
+    classDef never fill:#7F1D1D,stroke:#EF4444,stroke-width:2px,color:#fff,stroke-dasharray: 5 5;
+
+    SLACK["💬 <b>Slack</b><br/><code>/testauto runtests checkout staging</code>"]:::slack
+    RUNNERS["🖥️ <b>Test servers</b><br/>inside our network"]:::runner
+
+    PROXY["🔐 <b>Reverse proxy — in front of the app</b><br/>Terminates HTTPS, rate limits, and drops anything<br/>that is not a well-formed POST.<br/><i>A noise filter, not authentication. Slack publishes no<br/>stable egress IP list, so Door A's gates do the real work.</i>"]:::note
+
+    subgraph EDGE["🌐 EDGE SERVER — public host, real certificate. Validates, queues, hands out work."]
+        direction TB
+
+        subgraph DOORA["🚪 DOOR A — the Slack door (POST /slack/command)"]
+            direction TB
+            G1["🔍 <b>Gate 1 — is it really Slack?</b><br/>HMAC-SHA256 over <code>v0:timestamp:raw body</code>,<br/>constant-time compare, then reject anything<br/>stamped over 5 min ago.<br/><i>The timestamp must be INSIDE the hash — signing the<br/>body alone leaves the clock free to be edited.</i>"]:::edge
+            G2["👤 <b>Gate 2 — is this person allowed?</b><br/>Pin the workspace <code>team_id</code>, then allowlist the<br/><b>channel</b> and the <b>user</b>.<br/><i>Workspace membership is not entitlement — guests,<br/>contractors and Slack Connect are in there too.</i>"]:::edge
+            G3["📝 <b>Gate 3 — is the wording allowed?</b><br/>Suite and server each matched against a fixed list;<br/>strict regex on anything else.<br/><i>Never pass a person's typing to a machine.</i>"]:::edge
+            G4["🔁 <b>Gate 4 — have we seen this already?</b><br/>Slack retries anything slow, so key on <code>trigger_id</code><br/>and make a repeat a no-op.<br/><i>Without this, one slow morning is four runs.</i>"]:::edge
+        end
+
+        subgraph DOORB["🚪 DOOR B — the test-server door (the second public door)"]
+            direction TB
+            AUTH["🔑 <b>Ed25519, every request</b><br/>No Slack signature to lean on here, so this door<br/>gets its own. Signed over<br/><code>method · path · timestamp · sha256(body)</code>,<br/>rejected if older than 5 min.<br/><i>Replies are signed with the edge's own key, which<br/>each test server has pinned — so a job can only<br/>come from the real edge.</i>"]:::door
+            REG["📇 <b>Runner registry</b><br/>Who is enrolled, their public key, and when<br/>each was last heard from. No heartbeat for<br/>90s ⇒ offline, and handed no new work.<br/><i>Enrolment is one-time: a bootstrap token in the<br/>lab, or an operator pre-loading the key in prod.</i>"]:::door
+            LEASE["⏱️ <b>Hand out work under a lease</b><br/>One job goes to <b>exactly one</b> test server.<br/>A lease that expires is requeued, so a test<br/>server that dies loses no work."]:::door
+        end
+
+        Q["📋 <b>Job queue — SQLite on disk</b><br/>Survives a restart of the edge.<br/>The one piece of state that matters."]:::queue
+
+        ACK["⚡ <b>Answer within 3 seconds</b><br/><i>Queued — a test server will report to #testing</i><br/>Slack gives up after 3s and retries.<br/><b>This is the HTTP reply, not a Slack API call.</b>"]:::ack
+    end
+
+    NEVER["🚫 <b>What the edge deliberately does NOT do</b><br/>─────────────────────────<br/>• <b>Never runs a test.</b> The process answering the internet<br/>&nbsp;&nbsp;is not the process executing anything.<br/>• <b>Never calls Slack.</b> Every progress and result message<br/>&nbsp;&nbsp;comes from a test server, so no bot token lives out here.<br/>• <b>Never dials into our network.</b> It parks the job and<br/>&nbsp;&nbsp;waits to be asked."]:::never
+
+    SLACK -->|"HTTPS POST"| PROXY
+    PROXY --> G1
+    G1 -->|"valid signature"| G2
+    G2 -->|"allowed here"| G3
+    G3 -->|"allowed wording"| G4
+    G4 -->|"new request"| Q
+    Q --> ACK
+    ACK -.->|"ephemeral — only the sender sees it"| SLACK
+
+    G1 -.->|"bad or stale signature"| X1["❌ 401 — nothing else said"]:::note
+    G2 -.->|"wrong workspace, channel or person"| X2["🙅 Ephemeral refusal"]:::note
+    G3 -.->|"bad wording"| X3["💡 Ephemeral error + usage hint<br/><i>answered, not dropped</i>"]:::note
+    G4 -.->|"Slack retry"| X4["♻️ Already queued — no second run"]:::note
+
+    RUNNERS ==>|"every call is opened by the test server"| AUTH
+    AUTH --> REG
+    AUTH --> LEASE
+    LEASE <-->|"claim · renew · report"| Q
+
+    NEVER -.- EDGE

@@ -1,0 +1,73 @@
+%% title: Running Tests from Slack — Full Detail
+%% description: Edge server validates; test servers pull the work, run it, and do all the talking
+
+flowchart TD
+    classDef slack fill:#4A154B,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef edge fill:#1E293B,stroke:#F59E0B,stroke-width:2px,color:#fff;
+    classDef runner fill:#0F172A,stroke:#38BDF8,stroke-width:2px,color:#fff;
+    classDef queue fill:#0F172A,stroke:#A78BFA,stroke-width:2px,color:#fff;
+    classDef ack fill:#064E3B,stroke:#10B981,stroke-width:1px,color:#fff;
+    classDef risk fill:#7F1D1D,stroke:#EF4444,stroke-width:2px,color:#fff,stroke-dasharray: 5 5;
+    classDef note fill:#111827,stroke:#64748B,stroke-width:1px,color:#CBD5E1;
+    classDef trust fill:#1E1B4B,stroke:#818CF8,stroke-width:2px,color:#E0E7FF;
+
+    A["💬 <b>Someone in Slack</b><br/>types a command such as<br/><code>/testauto runtests checkout staging</code>"]:::slack
+
+    PROXY["🔐 <b>Gate 0 — the reverse proxy, NOT the app</b><br/>Terminates HTTPS, rate limits, drops<br/>anything that is not a well-formed POST.<br/><i>Noise filter only. Slack publishes no stable<br/>egress IP list, so this is not authentication —<br/>Gate 1 is.</i>"]:::note
+
+    subgraph EDGE["🌐 EDGE SERVER — public. Validates and queues. Runs no tests and never calls Slack."]
+        direction TB
+        G1["🔍 <b>Gate 1 — is it really Slack?</b><br/>HMAC-SHA256 over <code>v0:timestamp:raw body</code>,<br/>constant-time compare, then reject anything<br/>stamped more than 5 min ago<br/><i>(the timestamp must be INSIDE the hash, or<br/>the clock is free to be edited)</i>"]:::edge
+        G2["👤 <b>Gate 2 — is this person allowed?</b><br/>Pin the workspace <code>team_id</code>, then allowlist<br/>the <b>channel</b> and the <b>user</b>.<br/><i>Workspace membership is not entitlement —<br/>guests, contractors and Slack Connect are in there too.</i>"]:::edge
+        G3["📝 <b>Gate 3 — is the wording allowed?</b><br/>The <b>suite</b> and the <b>server</b> are each matched<br/>against a fixed list; strict regex on any extra filter.<br/><i>Never pass a person's typing to a machine.</i>"]:::edge
+        G4["🔁 <b>Gate 4 — have we seen this already?</b><br/>Slack retries anything slow, so key on<br/><code>trigger_id</code> and make a repeat a no-op.<br/><i>Without this, one slow morning is four runs.</i>"]:::edge
+        Q["📋 <b>Job queue — SQLite on disk</b><br/>Survives a restart. One job is claimed by<br/><b>exactly one</b> test server, under a lease.<br/>A lease that expires is requeued, so a<br/>test server that dies loses no work."]:::queue
+        ACK["⚡ <b>Answer within 3 seconds</b><br/><i>Queued — test server will report to #testing</i><br/>Slack gives up after 3s and retries.<br/><b>This is an HTTP reply, not a Slack API call.</b>"]:::ack
+        REG["📇 <b>Runner registry</b><br/>Who is enrolled, their public key,<br/>and when each was last heard from.<br/>No heartbeat for 90s ⇒ marked offline<br/>and handed no new work."]:::edge
+    end
+
+    subgraph RUNNERS["🖥️ TEST SERVERS — inside our network. Identical Debian 12 hosts. No inbound port. All the logic lives here."]
+        direction LR
+        R1["Test server 1<br/><i>running a job</i>"]:::runner
+        R2["Test server 2<br/><i>running a job</i>"]:::runner
+        R3["Test server 3<br/><i>idle — takes the next job</i>"]:::runner
+    end
+
+    SLACKOUT["📢 <b>Every Slack message comes from a TEST SERVER</b><br/>1 · task received&nbsp;&nbsp;2 · task started<br/>3 · task complete&nbsp;&nbsp;4 · summary of results<br/>Counts and a run id — never the suite's stdout.<br/><i>No SLACK_BOT_TOKEN configured ⇒ printed to the<br/>console instead, saying exactly what it would have sent.</i>"]:::slack
+
+    TRUST["🔑 <b>How the two sides trust each other — Ed25519, both directions</b><br/>────────────────────────────────────<br/>Each test server holds a private key and never sends it anywhere.<br/>The edge holds the matching <b>public</b> key, added at enrolment.<br/><br/><b>Test server ➜ edge</b>: every request is signed over<br/><code>method · path · timestamp · sha256(body)</code>, and rejected if older than 5 min.<br/><b>Edge ➜ test server</b>: every reply is signed with the edge's own key,<br/>which each test server has pinned — so a job can only come from the real edge.<br/><br/><i>Enrolment is one-time: a bootstrap token in the lab, or an operator<br/>pre-loading the public key for production. After that, keys only.</i>"]:::trust
+
+    PULL["🔒 <b>Every connection is opened by a test server</b><br/>Register · heartbeat · ask for work · report the result.<br/>The edge never dials in. It parks the job and waits to be asked,<br/>so <b>no inbound door opens on our network</b> — no listening port,<br/>no VPN, no inbound firewall rule. <i>Outbound HTTPS to the edge is still an<br/>egress rule; &ldquo;no inbound&rdquo; is the honest claim, not &ldquo;no rules&rdquo;.</i><br/><i>The edge still decides who gets what; only the direction of the wire is inverted.</i>"]:::note
+
+    WHERE["📍 <b>Where each piece runs</b><br/>• <b>Edge</b> — public host with a real certificate<br/>• <b>Test servers</b> — 1 to N inside the network<br/>• <b>Locally</b> — docker compose brings up 1 edge + 3 test servers,<br/>&nbsp;&nbsp;which is how queueing and one-job-one-runner are actually tested"]:::note
+
+    RISK["🚨 <b>The two risks, in one sentence each</b><br/>─────────────────────────<br/><b>1 · A public address that makes internal machines do work.</b><br/>A stranger who reaches it could run jobs we never asked for.<br/>⇒ Gates 1–3: prove it is Slack, prove the person is allowed,<br/>and match every word against a fixed list.<br/><br/><b>2 · The edge has a SECOND public door — the one test servers use.</b><br/>It has no Slack signature to lean on, so it gets its own:<br/>Ed25519 per test server, replay window, and an offline<br/>test server is handed nothing. A forged result is a forged<br/>Slack message, so results are signed too."]:::risk
+
+    A -->|"HTTPS POST"| PROXY
+    PROXY --> G1
+    G1 -->|"valid signature"| G2
+    G2 -->|"allowed here"| G3
+    G3 -->|"allowed wording"| G4
+    G4 -->|"new request"| Q
+    Q --> ACK
+    ACK -->|"ephemeral — only the sender sees it"| A
+
+    G1 -.->|"bad or stale signature"| X1["❌ 401 — nothing else said"]:::note
+    G2 -.->|"wrong workspace, channel or person"| X2["🙅 Ephemeral refusal"]:::note
+    G3 -.->|"bad wording"| X3["💡 Ephemeral error + usage hint<br/><i>answered, not dropped</i>"]:::note
+    G4 -.->|"Slack retry"| X4["♻️ Already queued — no second run"]:::note
+
+    RUNNERS ==>|"1 · enrol once, then heartbeat every 30s"| REG
+    RUNNERS ==>|"2 · long-poll: any work for me?"| Q
+    Q -.->|"held open ~25s, then a job or 'nothing yet'"| RUNNERS
+    RUNNERS ==>|"4 · signed result: counts, duration, exit code"| Q
+
+    RUNNERS -->|"3 · runs pytest, then says so — four times"| SLACKOUT
+    SLACKOUT --> A
+
+    TRUST -.- RUNNERS
+    TRUST -.- REG
+    PULL -.- RUNNERS
+    WHERE -.- EDGE
+    RISK -.- G1
+    RISK -.- Q

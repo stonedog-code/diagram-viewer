@@ -1,0 +1,64 @@
+%% title: Test Architecture — htmx
+%% description: The same layers do NOT apply — the contract is HTML, the waits are htmx lifecycle events, and the fragment tier moves out of Playwright entirely
+
+flowchart TD
+    classDef e2e fill:#1E293B,stroke:#38BDF8,stroke-width:2px,color:#fff;
+    classDef integration fill:#1E293B,stroke:#F59E0B,stroke-width:2px,color:#fff;
+    classDef helper fill:#0F172A,stroke:#10B981,stroke-width:2px,color:#fff;
+    classDef target fill:#334155,stroke:#94A3B8,stroke-width:1px,color:#fff;
+    classDef di fill:#4C1D95,stroke:#A855F7,stroke-width:2px,color:#fff;
+    classDef note fill:#111827,stroke:#64748B,stroke-width:1px,color:#CBD5E1;
+    classDef warn fill:#422006,stroke:#F59E0B,stroke-width:2px,color:#FEF3C7;
+
+    subgraph DI ["Playwright Fixture &amp; Dependency Injection Layer"]
+        FIX["<b>Custom Test Fixtures</b><br/><code>test.extend({ seed, pages })</code><br/><i>No API client — there is no JSON API to inject</i>"]:::di
+    end
+
+    subgraph TestSuites ["Test Execution Layer (AAA Pattern)"]
+        E2E["<b>tests/e2e/</b> — Playwright, in a browser<br/>User flows, swap behaviour, error states<br/><b>Nearly all htmx testing lives here</b>"]:::e2e
+        VIEWS["<b>tests/views/</b> — the BACKEND suite<br/>(pytest / RSpec), <b>not Playwright</b><br/>Fragment contracts: status, markup, <code>hx-*</code>"]:::integration
+    end
+
+    subgraph AbstractionLayer ["Abstraction &amp; Helper Layer"]
+        SEED["<b>tests/seed/</b><br/>State seeding via the service layer<br/>or a test-only route"]:::helper
+        POM["<b>tests/pages/</b><br/>Page Objects — locators, actions,<br/><b>named swap targets</b>, and the<br/>htmx lifecycle waits below"]:::helper
+    end
+
+    subgraph SystemUnderTest ["System Under Test (SUT)"]
+        CTRL["<b>HTML Endpoints / Controllers</b><br/>return fragments, not JSON"]:::target
+        MARKUP["<b>Server-rendered HTML</b><br/>carries the <code>hx-*</code> attributes<br/>that drive the next request"]:::target
+        DOM["<b>DOM after the swap</b><br/>(target element + any OOB swaps)"]:::target
+        DB[("<b>Database / State</b>")]:::target
+    end
+
+    subgraph NOTES ["What htmx changes about the suite — in the order it bites"]
+        direction TB
+        ASYM["<b>WHERE THE PARALLEL BREAKS — read this first</b><br/>─────────────────────────<br/>In REST, the API is a decoupled product with many clients, so an<br/>isolated contract tier inside the Playwright suite earns its place.<br/>In htmx a fragment is coupled to the exact DOM that asked for it,<br/>so there is no second consumer to write a contract for.<br/><br/>Firing <code>HX-Request</code> from Playwright's HTTP client uses none of<br/>the browser — that test belongs in the <b>backend</b> suite, where it is<br/>faster and closer to the template. <i>The layers look symmetrical;<br/>the weight is not. Push it down rather than across.</i>"]:::warn
+        N4["<b>Wait on htmx, not on Playwright's auto-wait</b><br/>Playwright does not know a swap is in flight, so a<br/>bare assertion races the response and flakes.<br/>Wait for <code>htmx:afterSettle</code> (or <code>afterSwap</code>), or<br/>on <code>.htmx-request</code> clearing from the indicator.<br/><i>This is the flake nearly every htmx suite hits.</i>"]:::note
+        N2["<b>Assert the TARGET, not just the response</b><br/>The signature htmx failure: a correct fragment<br/>swapped into the wrong element. The endpoint<br/>test passes and the page is broken.<br/><i>Out-of-band swaps change nodes outside the<br/>target, so those need their own assertions.</i>"]:::note
+        N6["<b>Errors do not swap by default</b><br/>htmx ignores a 4xx/5xx response unless something<br/>handles it, so a failed request silently changes<br/>nothing on screen.<br/><i>Seed the failure and assert the handler —<br/><code>htmx:responseError</code>, <code>hx-on</code>, or a 2xx error partial.</i>"]:::note
+        N5["<b>Not every trigger is a click</b><br/><code>hx-trigger</code> takes <code>revealed</code>, <code>intersect</code>, <code>delay</code><br/>and polling — so the Act step may be a scroll into<br/>view or an advance of Playwright's clock.<br/><i>A POM that only exposes clicks cannot reach these.</i>"]:::note
+        N1["<b>The contract is MARKUP, not a schema</b><br/>Assert HTML structure and the <code>hx-get</code> /<br/><code>hx-target</code> / <code>hx-swap</code> attributes — those<br/>attributes <i>are</i> the client's behaviour.<br/><i>A JSON-schema assertion has nothing to bite on.</i>"]:::note
+        N3["<b>Arrange cannot POST JSON</b><br/>No public JSON API to seed through, so Arrange<br/>goes via the service layer or a test-only route<br/>— never through the UI.<br/><i>Same rule as the REST stack, different door.</i>"]:::note
+        N7["<b>Test the endpoint twice</b><br/>The same URL should serve a full page to a plain<br/>request and a fragment to an <code>HX-Request</code>.<br/><i>That branch is invisible to a browser-only suite,<br/>and it is what progressive enhancement rests on.</i>"]:::note
+        ASYM ~~~ N4 ~~~ N2 ~~~ N6 ~~~ N5 ~~~ N1 ~~~ N3 ~~~ N7
+    end
+
+    %% Wiring & Injections
+    FIX -->|Injects instances| E2E
+
+    %% Abstraction Connections
+    E2E -->|1. Arrange: Fast State Seeding| SEED
+    E2E -->|2. Act &amp; Assert: UI + swap targets| POM
+    VIEWS -->|Arrange, Act, Assert| SEED
+    VIEWS -->|In-process request, no browser| CTRL
+
+    %% System Interactions
+    SEED -->|Service layer / test-only route| DB
+    POM -->|Playwright locators &amp; actions| DOM
+    CTRL --> DB
+    CTRL -->|renders| MARKUP
+    MARKUP -.->|hx-* attributes drive the next request| CTRL
+    MARKUP -->|swapped into| DOM
+
+    NOTES -.- TestSuites

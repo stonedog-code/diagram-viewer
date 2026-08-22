@@ -106,6 +106,35 @@ An explicit `UV_PROJECT_ENVIRONMENT` always wins over the script's choice.
 
 The slug is the filename without `.mer`.
 
+### Zooming a diagram
+
+A diagram page carries its own zoom controls, because the interesting diagrams
+here are far wider than a browser window and the page-level browser zoom shrinks
+the text along with everything else.
+
+| Control | Key | Does |
+|---|---|---|
+| **&minus;** / **+** | <kbd>-</kbd> / <kbd>+</kbd> | step down/up through fixed stops, 10% to 400% |
+| **Reset** | <kbd>0</kbd> | back to 100% |
+| **Fit** | <kbd>F</kbd> | shrink until the whole width is visible — never enlarges past 100% |
+| drag | — | pan, anywhere in the diagram area |
+
+**A page opens fitted to width, not at 100%**, and stays that way until you
+touch a control — a diagram that opens scrolled off the right edge reads as
+broken. Once you have zoomed, the page stops re-fitting itself.
+
+Two implementation notes, both of which are load-bearing and neither of which
+is obvious:
+
+- **The scaled element is not the one the scrollbars measure.** A CSS transform
+  does not affect layout, so scaling the diagram alone leaves the scrollable
+  area stuck at its unzoomed size and clips everything past it. A sizer element
+  wraps the scaled pane and is given the scaled dimensions explicitly.
+- **Mermaid's `<svg>` is pinned to its own `viewBox` after rendering.** It ships
+  as `width: 100%; max-width: <natural>px`, which is responsive but has no
+  definite width to resolve against inside a shrink-to-fit box — it collapses to
+  the CSS default 300px and the diagram renders as a thumbnail.
+
 ## Layout
 
 ```
@@ -149,29 +178,58 @@ source you can paste into any other tool. Rules:
 ## Testing
 
 ```bash
-bash run.sh test         # 29 tests
+bash run.sh test         # 32 tests
 ```
 
 - **unit** (`tests/test_loader.py`) — header parsing, the metadata/code split,
   discovery, sorting, and the path-traversal refusal.
 - **integration** (`tests/test_routes.py`) — the real routes against the real
   templates and the real files: the index lists one card per `.mer` file, every
-  link resolves 200, an unknown slug is 404, and titles are escaped.
+  link resolves 200, an unknown slug is 404, titles are escaped, every diagram
+  page ships all eight zoom-control ids, the zoom pane encloses the Mermaid
+  block, and no `.mer` label carries an unbalanced `"`.
+
+**Non-vacuity was checked rather than assumed** (2026-08-21). Each of the three
+zoom-related tests was made to fail on purpose — renaming `id="zoom-fit"`,
+moving the `<pre>` out of the pane, and planting a literal `"` inside a label —
+and each failure was caught by exactly one test, with the restored tree back to
+32 passing.
 
 **No E2E tier in the repo.** Mermaid actually producing SVG is the one thing
-neither tier can see — `TestClient` never runs the CDN module — and it was
+neither tier can see — `TestClient` never runs the CDN module — and it is
 checked by hand in a browser rather than by a committed Playwright suite. Do not
 describe this project as fully tested until that suite exists.
 
-Verified in a real browser on Linux 2026-08-19: index → click → diagram page,
-all three diagrams rendering SVG (48, 41 and 25 shape nodes respectively), with
-the flowchart's labels present in the rendered output.
+Verified in a real browser on Linux 2026-08-21, driving the running app. Every
+diagram in `diagrams/` produced SVG with no syntax error:
+
+| Diagram | Nodes | Subgraphs | Edges |
+|---|---|---|---|
+| `spa-vs-htmx` | 4 | 2 | 2 |
+| `slack-highlevel` | 6 | 0 | 8 |
+| `slack-edge-server` | 17 | 3 | 17 |
+| `slack-test-server` | 10 | 1 | 15 |
+| `slack-detailed` | 21 | 2 | 24 |
+| `test-traditional-rest` | 8 | 4 | 9 |
+| `test-htmx` | 17 | 5 | 19 |
+
+Counts, not a pass/fail: they are what tells you the next run examined the same
+set. The fit percentage a page opens at is deliberately **not** in the table —
+it depends on the viewport width, so it is not comparable between runs. The zoom controls were exercised on
+`slack-detailed`: fit 26% → in 40% → in 50% → out 40% → reset 100% → fit 25%,
+with the keyboard bindings agreeing, and the viewport's scrollable width
+tracking the zoom at every step (779px fitted, 3081px at 100%) — which is the
+check that the sizer is doing its job and the diagram is not being clipped.
 
 ## Notes
 
 - **The CDN import means the page needs internet to draw.** The server returns
   200 offline and the diagrams simply stay blank. To fix that, vendor
-  `mermaid.esm.min.mjs` and serve it locally.
+  `mermaid.esm.min.mjs` and serve it locally. The zoom controls still work in
+  that state — with no `<svg>` to pin they fall back to scaling the raw Mermaid
+  source, so the page degrades rather than breaking. Measured 2026-08-21 by
+  pointing the import at an unreachable host: no SVG, source still on screen,
+  fit 53% → in 65% → out 50% → reset 100%, scroll width tracking throughout.
 - **A slug never becomes a path.** `find_diagram` looks up the scanned set
   rather than building `diagrams/<slug>.mer`, so a slug cannot name a file
   outside the gallery. There is a test that plants a `.mer` file one directory

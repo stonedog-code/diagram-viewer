@@ -1,0 +1,11 @@
+%% title: SPA vs htmx — Where the Boundary Sits
+%% description: The same feature drawn twice — JSON payloads to a client-rendered UI, vs HTML fragments straight into the DOM
+
+flowchart LR
+    subgraph SPA ["Traditional SPA"]
+        SPA_UI["Frontend UI"] -- "JSON Payloads" --> REST["Public JSON API"]
+    end
+
+    subgraph HTMX ["HTMX Architecture"]
+        HTMX_UI["HTML + HTMX"] -- "HTML Fragments" --> HYBRID["HTML Endpoints / Controllers"]
+    end
