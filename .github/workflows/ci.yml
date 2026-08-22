@@ -41,8 +41,23 @@ jobs:
         with:
           enable-cache: true
 
+      # Chromium for the E2E tier, with the system libraries a headless
+      # browser needs on ubuntu-latest. `run.sh test` also calls
+      # `playwright install chromium`, which is then a no-op — but it cannot
+      # install the apt packages, and it must not try: `--with-deps` shells out
+      # to sudo, which is right here and wrong on a contributor's laptop.
+      #
+      # A missing browser is a FAILURE, not a skip. If this step breaks, the
+      # E2E tier fails loudly rather than quietly halving the gate's coverage.
+      - name: Install the browser the E2E tier drives
+        run: uv run playwright install --with-deps chromium
+
       # pytest exits 5 when it collects nothing, and run.sh execs it, so a
       # suite that silently stopped matching any files fails here rather than
       # passing over an empty set.
-      - name: Gate (29 tests — unit + integration)
+      #
+      # The E2E tier drives a real browser against a real uvicorn and imports
+      # Mermaid from the CDN, exactly as a reader's browser does — so this job
+      # needs outbound internet. That is deliberate; see the README.
+      - name: Gate (unit + integration + E2E)
         run: bash run.sh test

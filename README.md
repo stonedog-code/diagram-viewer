@@ -58,8 +58,13 @@ then starts the server. Open <http://localhost:8000>.
 ```bash
 bash run.sh                      # serve on :8000 with --reload
 bash run.sh serve --port 9000    # extra arguments go to uvicorn
-bash run.sh test                 # the test suite
+bash run.sh test                 # the test suite, all three tiers
+bash run.sh test tests/e2e       # just the browser tier
 ```
+
+`run.sh test` fetches the Chromium build the E2E tier drives before running
+pytest. That is a one-off download; once the build is present the call makes no
+network request at all, so it costs nothing on every run after the first.
 
 ### If the checkout is shared between two machines
 
@@ -144,7 +149,7 @@ diagram-viewer/
 ├── loader.py           # reading and parsing .mer files — no HTTP, no HTML
 ├── diagrams/           # one .mer file per diagram
 ├── templates/          # base.html + index.html + diagram.html (Jinja2)
-├── tests/              # unit (loader) + integration (routes)
+├── tests/              # unit (loader) + integration (routes) + e2e (browser)
 ├── scripts/uv-env.sh   # sourced by run.sh; picks .venv / .venv-macos
 ├── pyproject.toml      # deps (fastapi, uvicorn, jinja2)
 ├── uv.lock             # exact pinned versions
@@ -174,11 +179,15 @@ source you can paste into any other tool. Rules:
   the code.
 - With no `title`, the filename is used — `entity-relationship-diagram.mer`
   becomes "Entity Relationship Diagram".
+- **Add a row to the shape-count table below in the same commit.** The E2E tier
+  reads that table as its fixture, so a new `.mer` file with no row fails the
+  gate on purpose — an undocumented diagram is one nothing can tell has stopped
+  drawing properly.
 
 ## Testing
 
 ```bash
-bash run.sh test         # 32 tests
+bash run.sh test         # 55 tests — unit + integration + e2e
 ```
 
 - **unit** (`tests/test_loader.py`) — header parsing, the metadata/code split,
@@ -188,20 +197,53 @@ bash run.sh test         # 32 tests
   link resolves 200, an unknown slug is 404, titles are escaped, every diagram
   page ships all eight zoom-control ids, the zoom pane encloses the Mermaid
   block, and no `.mer` label carries an unbalanced `"`.
+- **e2e** (`tests/e2e/`) — Playwright against a real uvicorn in a real Chromium:
+  every diagram draws, draws *whole*, and the zoom controls behave at a named
+  viewport.
 
-**Non-vacuity was checked rather than assumed** (2026-08-21). Each of the three
-zoom-related tests was made to fail on purpose — renaming `id="zoom-fit"`,
-moving the `<pre>` out of the pane, and planting a literal `"` inside a label —
-and each failure was caught by exactly one test, with the restored tree back to
-32 passing.
+**Why the third tier is not optional here.** Rendering is client-side, so a
+`.mer` file Mermaid cannot parse still produces a perfectly valid 200 with a
+perfectly valid `<pre>` in it — every unit and integration test passes, and the
+page shows an error graphic. `TestClient` never executes the CDN module, so
+there is no assertion either of those tiers could add that would see it. The
+same goes for the zoom controls: jsdom has no layout engine, so it reports every
+box as zero-sized and would happily agree that a 3000px diagram fits a 375px
+window.
 
-**No E2E tier in the repo.** Mermaid actually producing SVG is the one thing
-neither tier can see — `TestClient` never runs the CDN module — and it is
-checked by hand in a browser rather than by a committed Playwright suite. Do not
-describe this project as fully tested until that suite exists.
+**Two things in the E2E tier are load-bearing:**
 
-Verified in a real browser on Linux 2026-08-21, driving the running app. Every
-diagram in `diagrams/` produced SVG with no syntax error:
+- **"An `<svg>` appeared" is not an assertion.** Mermaid's error graphic *is* an
+  `<svg>`. The suite checks `aria-roledescription` — `flowchart-v2` for a
+  diagram it parsed, `error` for one it did not — and then checks the shape
+  counts, which is what catches a diagram that renders but has quietly lost half
+  of itself.
+- **The table below is the fixture.** `tests/e2e/support.py` parses these rows
+  out of this file rather than restating them, so the documented numbers and the
+  asserted numbers cannot drift apart, and a `.mer` file with no row fails.
+
+**Non-vacuity was checked rather than assumed.** For the integration tier
+(2026-08-21), each of the three zoom-related tests was made to fail on purpose —
+renaming `id="zoom-fit"`, moving the `<pre>` out of the pane, and planting a
+literal `"` inside a label — and each was caught by exactly one test.
+
+For the E2E tier (2026-08-22), five failures were planted and the tree restored
+to green after each:
+
+| Planted | Caught by | Reported |
+|---|---|---|
+| a Mermaid syntax error | `test_diagram_renders_an_svg_…` | `aria-roledescription='error'`, 3 failed / 52 passed |
+| an unbalanced `"` in a label | the same test, **and** the integration guard | 4 failed / 51 passed |
+| one edge deleted — still renders | `test_diagram_shape_counts_…` only | `README {edges: 2}` vs `rendered {edges: 1}`, 1 failed / 54 passed |
+| `diagrams/` emptied | the input-set guard | `e2e: examined 0 diagram(s)`, 11 failed — an empty set FAILS |
+| a row deleted from the table below | the input-set guard | `in diagrams/ but not README: ['test-htmx']` |
+
+The third row is the one worth reading twice: the diagram still drew, so the
+"is there an svg" test passed and only the counts caught it. The fourth is the
+house rule about a green result over an empty set, implemented — every run
+prints the size of its input set, and 7-of-7 became 6-of-7 in the runs above.
+
+Counts asserted on every run, and verified by hand in a real browser on Linux
+2026-08-21 before they were:
 
 | Diagram | Nodes | Subgraphs | Edges |
 |---|---|---|---|
@@ -213,19 +255,33 @@ diagram in `diagrams/` produced SVG with no syntax error:
 | `test-traditional-rest` | 8 | 4 | 9 |
 | `test-htmx` | 17 | 5 | 19 |
 
-Counts, not a pass/fail: they are what tells you the next run examined the same
-set. The fit percentage a page opens at is deliberately **not** in the table —
-it depends on the viewport width, so it is not comparable between runs. The zoom controls were exercised on
-`slack-detailed`: fit 26% → in 40% → in 50% → out 40% → reset 100% → fit 25%,
-with the keyboard bindings agreeing, and the viewport's scrollable width
-tracking the zoom at every step (779px fitted, 3081px at 100%) — which is the
-check that the sizer is doing its job and the diagram is not being clipped.
+Nodes are `g.node`, subgraphs are `g.cluster`, edges are `path.flowchart-link`
+in the rendered SVG. The fit percentage a page opens at is deliberately **not**
+in the table — it depends on the viewport width, so it is not comparable between
+runs. `tests/e2e/test_zoom_controls.py` asserts it as a *relationship* instead,
+at a stated 700x800 viewport: a diagram wider than the window opens below 100%
+and does not scroll, Fit never enlarges one that already fits, the stops either
+side of 100% are 80% and 125%, the buttons and the keyboard agree, dragging
+pans, and the sizer's width doubles between 100% and 200% — which is the check
+that the sizer is doing its job and a zoomed-in diagram is not being clipped.
+Each of those tests asserts its own precondition (that the diagram really is
+wider than the viewport), so a future diagram set that happens to fit fails
+loudly rather than proving nothing.
 
 ## Notes
 
-- **The CDN import means the page needs internet to draw.** The server returns
-  200 offline and the diagrams simply stay blank. To fix that, vendor
-  `mermaid.esm.min.mjs` and serve it locally. The zoom controls still work in
+- **The CDN import means the page needs internet to draw — and so does CI.**
+  The server returns 200 offline and the diagrams simply stay blank. The E2E
+  tier therefore needs outbound network, which was a deliberate choice over
+  vendoring the bundle: mermaid@10's ESM entry point *lazy-loads* its diagram
+  implementations, so one page load pulls **15** files from the CDN (measured
+  2026-08-22), and a single vendored `mermaid.esm.min.mjs` would not be a
+  faithful stand-in for what a reader's browser does. Testing the page as it is
+  actually served is worth the dependency, and the suite is built to tell the
+  two failures apart: an unreachable CDN produces no `<svg>` at all and fails
+  with a message naming the CDN, where a broken diagram produces the error
+  graphic and fails naming the diagram. If flake ever makes that trade a bad
+  one, the fix is to vendor the whole `dist/` tree and serve it locally — The zoom controls still work in
   that state — with no `<svg>` to pin they fall back to scaling the raw Mermaid
   source, so the page degrades rather than breaking. Measured 2026-08-21 by
   pointing the import at an unreachable host: no SVG, source still on screen,

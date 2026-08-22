@@ -39,6 +39,18 @@ case "$cmd" in
     exec uv run uvicorn app:app "$@"
     ;;
   test)
+    # The E2E tier drives a real browser, so the browser is part of the
+    # environment this script is responsible for building — the same reason it
+    # runs `uv sync` above rather than assuming somebody did. Playwright only
+    # downloads a build it does not already have: with the browser present this
+    # makes no network call at all (verified by pointing
+    # PLAYWRIGHT_DOWNLOAD_HOST at a dead address and watching it exit 0), so it
+    # costs nothing on every run after the first.
+    #
+    # Not `--with-deps`: that shells out to sudo apt-get, which is right on a
+    # CI runner and wrong on somebody's laptop. CI installs the system
+    # libraries in its own step.
+    uv run playwright install chromium >/dev/null
     exec uv run pytest "$@"
     ;;
   *)
