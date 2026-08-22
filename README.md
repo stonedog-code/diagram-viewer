@@ -281,11 +281,12 @@ loudly rather than proving nothing.
   two failures apart: an unreachable CDN produces no `<svg>` at all and fails
   with a message naming the CDN, where a broken diagram produces the error
   graphic and fails naming the diagram. If flake ever makes that trade a bad
-  one, the fix is to vendor the whole `dist/` tree and serve it locally — The zoom controls still work in
-  that state — with no `<svg>` to pin they fall back to scaling the raw Mermaid
-  source, so the page degrades rather than breaking. Measured 2026-08-21 by
-  pointing the import at an unreachable host: no SVG, source still on screen,
-  fit 53% → in 65% → out 50% → reset 100%, scroll width tracking throughout.
+  one, the fix is to vendor the whole `dist/` tree and serve it locally.
+- **The page degrades offline rather than breaking.** The zoom controls still
+  work with no `<svg>` to pin: they fall back to scaling the raw Mermaid source.
+  Measured 2026-08-21 by pointing the import at an unreachable host — no SVG,
+  source still on screen, fit 53% → in 65% → out 50% → reset 100%, scroll width
+  tracking throughout.
 - **A slug never becomes a path.** `find_diagram` looks up the scanned set
   rather than building `diagrams/<slug>.mer`, so a slug cannot name a file
   outside the gallery. There is a test that plants a `.mer` file one directory
