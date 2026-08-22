@@ -25,3 +25,6 @@ wheels/
 # check they did not cause. Nothing local-only goes in it — if that changes,
 # this exception comes out with it.
 .claude/
+
+# Playwright writes traces and videos here when a browser test fails.
+test-results/
