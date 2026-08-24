@@ -184,6 +184,31 @@ source you can paste into any other tool. Rules:
   gate on purpose — an undocumented diagram is one nothing can tell has stopped
   drawing properly.
 
+## What it says at startup
+
+```
+INFO [diagram-viewer] app: scanned /…/diagram-viewer/diagrams — 7 diagram(s): slack-detailed, …
+```
+
+**That count is the point.** `DIAGRAMS_DIR` is relative to `loader.py` and the
+diagrams are read per request, so a wrong working directory, a container missing
+a mount, or a file saved as `.mmd` instead of `.mer` all produce the same thing:
+a server that starts cleanly, answers 200, and shows an empty gallery — which is
+indistinguishable from a project whose diagrams have not been added yet. Nothing
+used to say which of the two it was.
+
+An empty result adds a warning naming the directory and the required extension.
+A request for a diagram that does not exist logs what was asked for, because a
+bare 404 tells an operator nothing they can act on. Successful requests log
+nothing: uvicorn already has an access log, and duplicating it would bury the
+lines above.
+
+Logging is [`stonedog-logs`](https://pypi.org/project/stonedog-logs/), shared
+with the other Python tools here. `LOG_LEVEL` and `STONEDOG_LOGS_JSON=1` work as
+you would expect; it is configured only if nothing else has, because
+`uvicorn app:app` configures uvicorn's own loggers and would otherwise leave
+these lines with nowhere to go.
+
 ## Testing
 
 ```bash
