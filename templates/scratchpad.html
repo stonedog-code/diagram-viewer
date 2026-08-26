@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}Scratchpad — Diagram Gallery{% endblock %}
+
+{% block content %}
+<a class="back" href="/">&larr; All diagrams</a>
+<h1>Scratchpad</h1>
+
+{% if error %}
+{# The server's refusal. The textarea below is still populated from `form`,
+   which is the whole point: a save that fails must not cost the diagram. #}
+<p class="notice error" id="save-error" role="alert">{{ error }}</p>
+{% endif %}
+
+<form class="card" method="post" action="/scratchpad">
+    <div class="pad">
+        <div>
+            <label for="code">Mermaid source</label>
+            <textarea id="code" name="code" spellcheck="false"
+                      placeholder="graph TD&#10;    A[Client] --> B(API)&#10;    B --> C[(Database)]"
+                      aria-describedby="render-hint">{{ form.code }}</textarea>
+            <div class="actions">
+                <button type="button" id="render">Render</button>
+                <span class="kbd-hint" id="render-hint">or <kbd>Ctrl</kbd>+<kbd>Enter</kbd></span>
+            </div>
+        </div>
+
+        <div>
+            <label id="preview-label" for="preview">Preview</label>
+            {# Mermaid's own parse error, shown where the picture would be.
+               `hidden` rather than absent so the element is stable for the
+               script and for a test that waits on it. #}
+            <p class="notice error mono" id="render-error" role="alert" hidden></p>
+            <div class="preview" id="preview" role="img" aria-labelledby="preview-label">
+                <p class="placeholder" id="preview-placeholder">
+                    Nothing rendered yet — write some Mermaid and press Render.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="meta">
+        <div>
+            <label for="title">Title</label>
+            <input type="text" id="title" name="title" value="{{ form.title }}"
+                   placeholder="Architecture Flowchart" autocomplete="off">
+        </div>
+        <div>
+            <label for="description">Description</label>
+            <input type="text" id="description" name="description" value="{{ form.description }}"
+                   placeholder="Services and pipelines at a glance" autocomplete="off">
+        </div>
+        <div>
+            <label for="slug">File name</label>
+            <input type="text" id="slug" name="slug" value="{{ form.slug }}"
+                   placeholder="architecture-flowchart" autocomplete="off"
+                   aria-describedby="slug-hint">
+        </div>
+    </div>
+    <p class="hint" id="slug-hint">
+        Lowercase letters, digits and dashes. Leave it blank to take one from the
+        title. Saved as <code>&lt;name&gt;.mer</code>; an existing diagram is never
+        overwritten.
+    </p>
+
+    <div class="actions">
+        <button type="submit" class="primary" id="save">Save as a new diagram</button>
+    </div>
+</form>
+
+<script>
+(function () {
+    var source = document.getElementById('code');
+    var preview = document.getElementById('preview');
+    var placeholder = document.getElementById('preview-placeholder');
+    var errorBox = document.getElementById('render-error');
+    var button = document.getElementById('render');
+    if (!source || !preview || !errorBox || !button) return;
+
+    // A fresh id per render. NOT load-bearing, and the comment here used to
+    // claim it was: "reusing one leaves the previous definition in Mermaid's
+    // cache". Planting a fixed id and running this file's tests disproved that
+    // — mermaid@10 redraws correctly either way. It is kept because two
+    // elements must not share an `id`, and because the error path below has an
+    // orphan to find by name; it is not kept because rendering depends on it.
+    var seq = 0;
+    var inFlight = 0;
+
+    function showError(message) {
+        errorBox.textContent = message;
+        errorBox.hidden = false;
+    }
+
+    function clearError() {
+        errorBox.hidden = true;
+        errorBox.textContent = '';
+    }
+
+    function render() {
+        var text = source.value;
+        clearError();
+
+        if (!text.trim()) {
+            preview.innerHTML = '';
+            preview.appendChild(placeholder);
+            showError('There is nothing to render yet.');
+            return;
+        }
+
+        var mine = ++inFlight;
+        window.mermaidReady.then(function (mermaid) {
+            var id = 'scratchpad-' + (++seq);
+            return mermaid.render(id, text).then(function (result) {
+                // A slow render that finished after a newer one started must
+                // not overwrite it. Without this, typing and pressing Render
+                // twice can leave the OLDER diagram on screen, which reads as
+                // "the button did nothing".
+                if (mine !== inFlight) return;
+                preview.innerHTML = result.svg;
+                if (typeof result.bindFunctions === 'function') {
+                    result.bindFunctions(preview);
+                }
+            });
+        }).catch(function (err) {
+            if (mine !== inFlight) return;
+            preview.innerHTML = '';
+            preview.appendChild(placeholder);
+            // Mermaid throws a `str` on some parse failures and an Error on
+            // others; either way the author wants the text, not "[object
+            // Object]".
+            showError(String((err && (err.str || err.message)) || err));
+            // A failed render leaves Mermaid's temporary element behind, and
+            // it is an <svg> — which is exactly what a test waiting for a
+            // successful render looks for.
+            var orphan = document.getElementById('dscratchpad-' + seq);
+            if (orphan && orphan.parentNode) orphan.parentNode.removeChild(orphan);
+        });
+    }
+
+    button.addEventListener('click', render);
+    source.addEventListener('keydown', function (event) {
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+            event.preventDefault();
+            render();
+        }
+    });
+
+    // Come back from a refused save with the source intact and already drawn:
+    // the author was looking at a picture when they pressed Save, and taking
+    // it away to show them an error is a second thing gone wrong.
+    if (source.value.trim()) render();
+})();
+</script>
+{% endblock %}

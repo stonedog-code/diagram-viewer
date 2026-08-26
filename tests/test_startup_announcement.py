@@ -74,8 +74,9 @@ def test_an_empty_directory_says_so_rather_than_starting_silently(
     """
     empty = tmp_path / "no-diagrams-here"
     empty.mkdir()
+    # One patch, not two: `app` reads `loader.DIAGRAMS_DIR` through the module
+    # now, so there is only one binding of this fact to move.
     monkeypatch.setattr(loader, "DIAGRAMS_DIR", empty)
-    monkeypatch.setattr(app_module, "DIAGRAMS_DIR", empty)
 
     logged = _start(caplog)
 
@@ -91,7 +92,6 @@ def test_a_missing_directory_is_reported_rather_than_crashing(
     the app is still useful for whatever is there, which is nothing."""
     missing = tmp_path / "never-created"
     monkeypatch.setattr(loader, "DIAGRAMS_DIR", missing)
-    monkeypatch.setattr(app_module, "DIAGRAMS_DIR", missing)
 
     logged = _start(caplog)
 

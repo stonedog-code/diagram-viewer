@@ -6,9 +6,38 @@
     <title>{% block title %}Diagram Gallery{% endblock %}</title>
     <!-- Mermaid is loaded from the CDN, so the page needs internet to draw.
          Offline, the HTML still returns 200 and the diagrams simply stay blank. -->
+    <script>
+        // A classic script runs before any module, so this promise exists by
+        // the time the import below settles. The scratchpad draws ON DEMAND
+        // rather than at load, so it needs the module object itself — and an
+        // ES module's bindings are not global. Publishing it here beats every
+        // page importing the CDN again.
+        window.mermaidReady = new Promise(function (resolve, reject) {
+            window.__mermaidResolve = resolve;
+            window.__mermaidReject = reject;
+        });
+    </script>
     <script type="module">
         import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
         mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+        window.mermaid = mermaid;
+        window.__mermaidResolve(mermaid);
+    </script>
+    <script>
+        // An unreachable CDN makes the module never run, so the promise above
+        // would stay pending forever and a Render click would hang with no
+        // explanation. Name that failure instead: it is a different problem
+        // from a diagram that will not parse, and it is the one that looks
+        // like the button is broken.
+        window.addEventListener('load', function () {
+            setTimeout(function () {
+                if (!window.mermaid) {
+                    window.__mermaidReject(new Error(
+                        'Mermaid could not be loaded from cdn.jsdelivr.net. ' +
+                        'This page needs internet access to draw.'));
+                }
+            }, 10000);
+        });
     </script>
     <style>
         body {
@@ -146,6 +175,155 @@
             padding: 1rem;
             overflow-x: auto;
             color: #cbd5e1;
+        }
+
+        /* --- scratchpad --------------------------------------------------- */
+        .pad {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+        /* One column once two would each be too narrow to type or read in.
+           The editor is the taller half, so it goes first when they stack. */
+        @media (max-width: 900px) {
+            .pad { grid-template-columns: 1fr; }
+        }
+        .pad textarea {
+            width: 100%;
+            box-sizing: border-box;
+            min-height: 22rem;
+            resize: vertical;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            tab-size: 4;
+            color: #f8fafc;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            padding: 0.75rem;
+        }
+        .pad textarea:focus-visible,
+        .meta input:focus-visible {
+            outline: 2px solid #38bdf8;
+            outline-offset: 1px;
+        }
+        /* Not scoped to `.pad`: the metadata fields sit outside it, and with
+           the rule written that way their labels and inputs flowed inline —
+           three fields crammed onto one line. */
+        .pad label,
+        .meta label {
+            display: block;
+            font-size: 0.85rem;
+            color: #94a3b8;
+            margin: 0 0 0.35rem;
+        }
+        .pad label { margin-top: 1rem; }
+        .meta {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 0 1.25rem;
+            margin-top: 1.5rem;
+        }
+        @media (max-width: 900px) {
+            .meta { grid-template-columns: 1fr; gap: 1rem 0; }
+        }
+        .meta input[type="text"] {
+            width: 100%;
+            box-sizing: border-box;
+            font: inherit;
+            font-size: 0.95rem;
+            color: #f8fafc;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            padding: 0.5rem 0.6rem;
+        }
+        .hint {
+            color: #64748b;
+            font-size: 0.8rem;
+            margin: 0.5rem 0 0;
+        }
+        .actions {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+        .actions button {
+            font: inherit;
+            font-size: 0.95rem;
+            padding: 0.55rem 1.1rem;
+            color: #f8fafc;
+            background: #334155;
+            border: 1px solid #475569;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .actions button:hover { background: #475569; }
+        .actions button:focus-visible {
+            outline: 2px solid #38bdf8;
+            outline-offset: 2px;
+        }
+        .actions button.primary {
+            background: #0369a1;
+            border-color: #0284c7;
+        }
+        .actions button.primary:hover { background: #0284c7; }
+        .actions .kbd-hint {
+            color: #64748b;
+            font-size: 0.85rem;
+        }
+        .preview {
+            background: #ffffff;
+            border-radius: 6px;
+            padding: 1rem;
+            overflow: auto;
+            max-height: 70vh;
+            min-height: 12rem;
+        }
+        /* The placeholder is the only thing on a white panel before a render,
+           so it needs a colour that is not the page's light-on-dark. */
+        .preview .placeholder {
+            color: #64748b;
+            font-size: 0.9rem;
+            margin: 0;
+        }
+        .notice {
+            border-radius: 6px;
+            padding: 0.75rem 1rem;
+            margin: 0 0 1rem;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+        .notice.error {
+            background: #450a0a;
+            border: 1px solid #b91c1c;
+            color: #fecaca;
+        }
+        .notice pre {
+            margin: 0.5rem 0 0;
+            white-space: pre-wrap;
+            font-size: 0.85rem;
+            color: #fca5a5;
+        }
+        .notice[hidden] { display: none; }
+        /* Mermaid's parse errors point at the offending token with a `^` on
+           the next line. In a proportional face that caret lands under the
+           wrong character, which makes the most useful part of the message
+           actively misleading. */
+        .notice.mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.8rem;
+            white-space: pre-wrap;
+            overflow-x: auto;
+        }
+        .new-diagram {
+            display: inline-block;
+            margin-bottom: 1.5rem;
+            font-size: 0.95rem;
         }
     </style>
 </head>
