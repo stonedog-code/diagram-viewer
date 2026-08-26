@@ -17,12 +17,14 @@ Two things here are load-bearing and easy to undo by accident:
 
 from __future__ import annotations
 
+import os
 import socket
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 
 import pytest
 
@@ -35,8 +37,8 @@ def _free_port() -> int:
         return sock.getsockname()[1]
 
 
-@pytest.fixture(scope="session")
-def app_server() -> str:
+@contextmanager
+def _serve(env: dict | None = None) -> str:
     """A real uvicorn on a real port, torn down however the session ends.
 
     `sys.executable -m uvicorn` rather than `uv run`, so the subprocess inherits
@@ -49,6 +51,7 @@ def app_server() -> str:
         [sys.executable, "-m", "uvicorn", "app:app", "--port", str(port),
          "--host", "127.0.0.1", "--log-level", "warning"],
         cwd=str(REPO_ROOT),
+        env={**os.environ, **(env or {})},
     )
     try:
         deadline = time.monotonic() + 30
@@ -72,6 +75,31 @@ def app_server() -> str:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=10)
+
+
+@pytest.fixture(scope="session")
+def app_server() -> str:
+    """The gallery, serving this repository's own `diagrams/`. Read-only."""
+    with _serve() as base:
+        yield base
+
+
+@pytest.fixture(scope="session")
+def scratch_server(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """A SECOND server whose diagram directory is a throwaway one.
+
+    The scratchpad writes files, and the only honest way to test that is to let
+    it. Pointed at `diagrams/` it would leave a diagram behind that the next run
+    reports as undocumented — and a test that pollutes the tree it is testing
+    passes the first time and fails for the next person.
+
+    `DIAGRAM_VIEWER_DIAGRAMS_DIR` is the app's own configuration, not a test
+    hook: this is the same knob a self-hosted instance uses to keep its diagrams
+    outside the checkout.
+    """
+    directory = tmp_path_factory.mktemp("scratch-diagrams")
+    with _serve({"DIAGRAM_VIEWER_DIAGRAMS_DIR": str(directory)}) as base:
+        yield base
 
 
 @pytest.fixture(scope="session")

@@ -108,8 +108,45 @@ An explicit `UV_PROJECT_ENVIRONMENT` always wins over the script's choice.
 |---|---|
 | `/` | every `.mer` file in `diagrams/`, title and description, linked |
 | `/diagram/{slug}` | that one diagram rendered, plus its source in a `<details>` |
+| `/scratchpad` | write Mermaid, press Render, save it as a new diagram |
 
 The slug is the filename without `.mer`.
+
+### The scratchpad
+
+Write Mermaid in the box, press **Render** (or <kbd>Ctrl</kbd>+<kbd>Enter</kbd>)
+and the picture appears beside it. Give it a title and press **Save as a new
+diagram**: it is written to `diagrams/` as a `.mer` file and you land on its own
+page, zoom controls and all. From then on it is an ordinary diagram — there is
+nothing special about a file the scratchpad wrote.
+
+The file name is optional; leave it blank and it comes from the title
+(`Architecture Flowchart` → `architecture-flowchart.mer`).
+
+**Rendering happens in the browser, saving on the server**, and the split is
+deliberate. Every diagram page already draws client-side, so a Render button
+that posted to the server would be a second rendering path to keep in agreement
+with the first — and the two disagreeing is a preview that lies.
+
+Three rules the Save button follows, each of which is a way this could go wrong:
+
+- **An existing diagram is never overwritten.** A name already taken is refused
+  and says so. The author of the file that would be replaced is not the person
+  clicking Save, and the file they would lose is not on screen.
+- **A refused save never costs you the source.** The page comes back with the
+  textarea still populated *and the diagram re-drawn*. The text is the only
+  thing on that page that took any effort.
+- **A name is a file name, and is validated as one.** Lowercase letters, digits
+  and dashes, starting with a letter or digit. That admits no `.`, no `/` and no
+  `..` — which is what makes building `diagrams/<name>.mer` safe at all. This is
+  the only place in the app where something typed into a form becomes a path;
+  everywhere else looks a diagram up by scanning the directory, which is why
+  `find_diagram` needs no validation of its own.
+
+Mermaid's parse errors are shown where the picture would be. That matters more
+than it sounds: Mermaid draws its *own* error graphic as an `<svg>`, so "an svg
+appeared" is not evidence of a successful render — which is why the E2E tests
+check `aria-roledescription` rather than the presence of an element.
 
 ### Zooming a diagram
 
@@ -147,8 +184,8 @@ diagram-viewer/
 ├── run.sh              # start it — picks the right venv per platform
 ├── app.py              # the two routes
 ├── loader.py           # reading and parsing .mer files — no HTTP, no HTML
-├── diagrams/           # one .mer file per diagram
-├── templates/          # base.html + index.html + diagram.html (Jinja2)
+├── diagrams/           # one .mer file per diagram — the scratchpad writes here
+├── templates/          # base.html + index.html + diagram.html + scratchpad.html
 ├── tests/              # unit (loader) + integration (routes) + e2e (browser)
 ├── scripts/uv-env.sh   # sourced by run.sh; picks .venv / .venv-macos
 ├── pyproject.toml      # deps (fastapi, uvicorn, jinja2)
@@ -156,7 +193,23 @@ diagram-viewer/
 └── .python-version     # 3.12; uv downloads it if the machine lacks it
 ```
 
+### Keeping the diagrams outside the checkout
+
+`DIAGRAM_VIEWER_DIAGRAMS_DIR` points the app at another directory:
+
+```bash
+DIAGRAM_VIEWER_DIAGRAMS_DIR=~/diagrams bash run.sh
+```
+
+Useful for a self-hosted instance whose diagrams are not this repository's, and
+it is what the E2E tier uses to give the scratchpad a writable directory that is
+*not* `diagrams/` — a test that saved into the real one would leave a diagram
+behind for every future run, and would pass while doing it.
+
 ## Adding a diagram
+
+Two ways, and they produce the same thing. Use `/scratchpad` if you want to see
+it as you write it; drop the file in yourself if you already have the source.
 
 Drop a `.mer` file into `diagrams/`. Nothing else — the directory is scanned per
 request, so a new file appears on the next page load even without `--reload`.

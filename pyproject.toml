@@ -8,6 +8,10 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141.1",
     "jinja2>=3.1.6",
+    # The scratchpad posts a form, and FastAPI refuses to even import a route
+    # with `Form(...)` in it without this — the failure is at startup, not at
+    # request time, so a missing dependency here takes the whole app down.
+    "python-multipart>=0.0.20",
     "uvicorn>=0.52.4",
     # Structured logging, shared with the other Python tools here. What it buys
     # this app specifically is one startup line naming the directory it scanned
