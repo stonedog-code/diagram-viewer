@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "project": "diagram-viewer",
+  "//integration": "Omitted rather than declared empty: nobody has decided whether this project wants an integration tier between its route tests and its browser tests.",
+  "tiers": {
+    "unit": {
+      "include": ["tests/test_*.py"]
+    },
+    "e2e": {
+      "include": ["tests/e2e/**/test_*.py"]
+    }
+  }
+}
